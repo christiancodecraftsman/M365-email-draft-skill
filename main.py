@@ -92,7 +92,7 @@ class M365Client:
         self.logger.info("User authenticated from flow")
         exit()
 
-    def create_draft(self, subject, body, to_emails):
+    def create_draft(self, subject, body, to, cc, bcc):
         token = self.get_token()
         url = "https://graph.microsoft.com/v1.0/me/messages"
         headers = {
@@ -100,20 +100,16 @@ class M365Client:
             'Content-Type': 'application/json'
         }
 
-        recipients_payload = []
-        for email in to_emails:
-            clean_email = email.strip()
-            if clean_email:
-                recipients_payload.append({
-                    "emailAddress": {
-                        "address": clean_email
-                    }
-                })
         payload = {
             "subject": subject,
             "body": {"contentType": "HTML", "content": body},
-            "toRecipients": recipients_payload,
+            "toRecipients": format_recipients(to),
         }
+
+        if cc:
+            payload["ccRecipients"] = format_recipients(cc)
+        if bcc:
+            payload["bccRecipients"] = format_recipients(bcc)
 
         self.logger.info(f"Email draft payload generated:\npayload: /{payload}")
         
@@ -122,6 +118,30 @@ class M365Client:
         self.logger.info(f"Graph API Response: /{json}")
 
         return json
+
+def format_recipients(to_input: str | list[str]) -> list[dict]:
+    """
+    Normalizes email input (string or list) and returns the 
+    nested JSON structure required by Microsoft Graph API.
+    """
+    # 1. Ensure we are working with a list
+    if isinstance(to_input, str):
+        to_input = [to_input]
+    
+    # 2. Extract and clean every individual email
+    clean_emails = []
+    for entry in to_input:
+        # Replace commas with spaces, then split into individual words
+        parts = entry.replace(',', ' ').split()
+        clean_emails.extend(parts)
+    
+    # 3. Construct the nested objects
+    # Result: [{"emailAddress": {"address": "email@example.com"}}, ...]
+    return [
+        {"emailAddress": {"address": email.strip()}}
+        for email in clean_emails
+        if "@" in email  # Basic validation to skip junk
+    ]
 
 if __name__ == "__main__":
     # Load environment from .env file
@@ -137,6 +157,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="M365 Agent Tool")
     parser.add_argument("--login", action="store_true", help="Manual interactive login")
     parser.add_argument("--to", nargs='+', help="One or more recipient email addresses") # space seperate list
+    parser.add_argument("--cc", nargs='+', help="carbon copy") # space seperate list
+    parser.add_argument("--bcc", nargs='+', help="blind carbon copy") # space seperate list
     parser.add_argument("--subject", type=str, default="New Draft from AI", help="Email subject")
     parser.add_argument("--body", type=str, help="Email body (HTML supported)")
     args = parser.parse_args()
@@ -150,7 +172,9 @@ if __name__ == "__main__":
         res = client.create_draft(
             args.subject, 
             args.body, 
-            args.to
+            args.to,
+            args.cc,
+            args.bcc
         )
 
         print("Draft successfully created!")
